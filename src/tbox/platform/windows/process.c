@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Copyright (C) 2009-2020, TBOOX Open Source Group.
+ * Copyright (C) 2009-present, TBOOX Open Source Group.
  *
  * @author      ruki
  * @file        process.c
@@ -48,10 +48,13 @@ typedef struct __tb_process_t
     // the process info
     PROCESS_INFORMATION     pi;
 
-    /// the stdout redirect type
+    // the stdin redirect type
+    tb_uint16_t             intype;
+
+    // the stdout redirect type
     tb_uint16_t             outtype;
 
-    /// the stderr redirect type
+    // the stderr redirect type
     tb_uint16_t             errtype;
 
     // the user private data
@@ -106,6 +109,11 @@ tb_void_t tb_process_handle_close(tb_process_ref_t self)
         CloseHandle(process->pi.hProcess);
     process->pi.hProcess = INVALID_HANDLE_VALUE;
 
+    // exit stdin file
+    if (process->intype == TB_PROCESS_REDIRECT_TYPE_FILEPATH && process->si.hStdInput && process->si.hStdInput != INVALID_HANDLE_VALUE)
+        tb_file_exit((tb_file_ref_t)process->si.hStdInput);
+    process->si.hStdInput = INVALID_HANDLE_VALUE;
+
     // exit stdout file
     if (process->outtype == TB_PROCESS_REDIRECT_TYPE_FILEPATH && process->si.hStdOutput && process->si.hStdOutput != INVALID_HANDLE_VALUE)
         tb_file_exit((tb_file_ref_t)process->si.hStdOutput);
@@ -141,43 +149,32 @@ tb_void_t tb_process_group_exit()
 }
 static tb_void_t tb_process_args_append(tb_string_ref_t result, tb_char_t const* cstr)
 {
-    // wrap and escape characters
+    // need wrap quote?
     tb_char_t ch;
-    tb_size_t n = 0;
     tb_char_t const* p = cstr;
     tb_bool_t wrap_quote = tb_false;
-    tb_char_t buff[TB_PATH_MAXN];
-    tb_size_t m = tb_arrayn(buff);
-    while ((ch = *p) && n < m)
+    while ((ch = *p))
     {
-        // escape '"'
-        if (ch == '\"')
-        {
-            if (n < m) buff[n++] = '\\';
-        }
-        else if (ch == ' ' || ch == '(' || ch == ')') wrap_quote = tb_true;
-        if (n < m) buff[n++] = ch;
+        if (ch == ' ' || ch == '(' || ch == ')') wrap_quote = tb_true;
         p++;
     }
-    tb_assert_and_check_return(n < m);
-    buff[n] = '\0';
 
-    // wrap "" if exists escape characters and spaces?
-    if (wrap_quote)
+    // wrap begin quote
+    if (wrap_quote) tb_string_chrcat(result, '\"');
+
+    // escape characters
+    p = cstr;
+    while ((ch = *p))
     {
-        tb_string_chrcat(result, '\"');
-        tb_size_t i = 0;
-        tb_char_t ch;
-        for (i = 0; i < n; i++)
-        {
-            ch = buff[i];
-            if (ch == '\\') // escape the '\\' characters in ""
-                tb_string_chrcat(result, '\\');
-            tb_string_chrcat(result, ch);
-        }
-        tb_string_chrcat(result, '\"');
+        // escape '"' or '\\'
+        if (ch == '\"' || (wrap_quote && ch == '\\'))
+            tb_string_chrcat(result, '\\');
+        tb_string_chrcat(result, ch);
+        p++;
     }
-    else if (n) tb_string_cstrncat(result, buff, n);
+
+    // wrap end quote
+    if (wrap_quote) tb_string_chrcat(result, '\"');
 }
 
 /* //////////////////////////////////////////////////////////////////////////////////////
@@ -228,7 +225,7 @@ tb_process_ref_t tb_process_init_cmd(tb_char_t const* cmd, tb_process_attr_ref_t
 
     tb_bool_t       ok          = tb_false;
     tb_process_t*   process     = tb_null;
-    tb_char_t*      environment = tb_null;
+    tb_wchar_t*     environment = tb_null;
     tb_bool_t       userenv     = tb_false;
     tb_wchar_t*     command     = tb_null;
     do
@@ -247,10 +244,9 @@ tb_process_ref_t tb_process_init_cmd(tb_char_t const* cmd, tb_process_attr_ref_t
         tb_bool_t detach = attr && (attr->flags & TB_PROCESS_FLAG_DETACH);
 
         // init flags
-        DWORD flags = 0;
+        DWORD flags = CREATE_UNICODE_ENVIRONMENT;
         if (attr && attr->flags & TB_PROCESS_FLAG_SUSPEND) flags |= CREATE_SUSPENDED;
         if (!detach) flags |= CREATE_BREAKAWAY_FROM_JOB; // create process with parent process group by default, need set JOB_OBJECT_LIMIT_BREAKAWAY_OK limit for job
-//        if (attr && attr->envp) flags |= CREATE_UNICODE_ENVIRONMENT;
 
         // get the cmd size
         tb_size_t cmdn = tb_strlen(cmd);
@@ -293,49 +289,80 @@ tb_process_ref_t tb_process_init_cmd(tb_char_t const* cmd, tb_process_attr_ref_t
             tb_size_t n = tb_strlen(p);
 
             // ensure data space
+            tb_size_t space = n * 3 / 2;
             if (!environment)
             {
-                maxn = n + 2 + TB_PATH_MAXN;
-                environment = (tb_char_t*)tb_malloc(maxn);
+                maxn = space + TB_PATH_MAXN;
+                environment = tb_nalloc_type(maxn + 1, tb_wchar_t);
             }
-            else if (size + n + 2 > maxn)
+            else if (size + space > maxn)
             {
-                maxn = size + n + 2 + TB_PATH_MAXN;
-                environment = (tb_char_t*)tb_ralloc(environment, maxn);
+                maxn = size + space + TB_PATH_MAXN;
+                environment = tb_ralloc_type(environment, maxn + 1, tb_wchar_t);
             }
             tb_assert_and_check_break(environment);
 
             // append it
-            tb_memcpy(environment + size, p, n);
+            tb_size_t real = tb_atow(environment + size, p, maxn - size);
+            tb_assert_and_check_break(real != -1);
 
-            // fill '\0'
-            environment[size + n] = '\0';
-
-            // update size
-            size += n + 1;
+            // update size and fill '\0'
+            size += real;
+            environment[size] = L'\0';
+            size++;
         }
 
         // end
-        if (environment) environment[size++] = '\0';
+        if (environment) environment[size++] = L'\0';
         // uses the current user environment if be null
         else
         {
-            // uses the unicode environment
-            flags |= CREATE_UNICODE_ENVIRONMENT;
-
             // get user environment
-            environment = (tb_char_t*)tb_kernel32()->GetEnvironmentStringsW();
+            environment = (tb_wchar_t*)tb_kernel32()->GetEnvironmentStringsW();
 
             // mark as the user environment
             userenv = tb_true;
         }
 
-        // redirect the stdout
+        // redirect
         BOOL bInheritHandle = FALSE;
         if (attr)
         {
+            // redirect from stdin
+            process->intype = attr->intype;
+            if (attr->intype == TB_PROCESS_REDIRECT_TYPE_FILEPATH && attr->inpath)
+            {
+                // the inmode
+                tb_size_t inmode = attr->inmode;
+
+                // no mode? uses the default mode
+                if (!inmode) inmode = TB_FILE_MODE_RO;
+
+                // enable handles
+                process->si.dwFlags |= STARTF_USESTDHANDLES;
+
+                // open file
+                process->si.hStdInput = (HANDLE)tb_file_init(attr->inpath, inmode);
+                tb_assertf_pass_and_check_break(process->si.hStdInput, "cannot redirect stdin to file: %s", attr->inpath);
+
+                // enable inherit
+                tb_kernel32()->SetHandleInformation(process->si.hStdInput, HANDLE_FLAG_INHERIT, TRUE);
+                bInheritHandle = TRUE;
+            }
+            else if ((attr->intype == TB_PROCESS_REDIRECT_TYPE_PIPE && attr->inpipe) ||
+                     (attr->intype == TB_PROCESS_REDIRECT_TYPE_FILE && attr->infile))
+            {
+                // enable handles
+                process->si.dwFlags |= STARTF_USESTDHANDLES;
+                process->si.hStdInput = attr->intype == TB_PROCESS_REDIRECT_TYPE_PIPE? tb_pipe_file_handle(attr->inpipe) : (HANDLE)attr->infile;
+
+                // enable inherit
+                tb_kernel32()->SetHandleInformation(process->si.hStdInput, HANDLE_FLAG_INHERIT, TRUE);
+                bInheritHandle = TRUE;
+            }
+
+            // redirect to stdout
             process->outtype = attr->outtype;
-            process->errtype = attr->errtype;
             if (attr->outtype == TB_PROCESS_REDIRECT_TYPE_FILEPATH && attr->outpath)
             {
                 // the outmode
@@ -367,7 +394,8 @@ tb_process_ref_t tb_process_init_cmd(tb_char_t const* cmd, tb_process_attr_ref_t
                 bInheritHandle = TRUE;
             }
 
-            // redirect the stderr
+            // redirect to stderr
+            process->errtype = attr->errtype;
             if (attr->errtype == TB_PROCESS_REDIRECT_TYPE_FILEPATH && attr->errpath)
             {
                 // the errmode
@@ -398,6 +426,14 @@ tb_process_ref_t tb_process_init_cmd(tb_char_t const* cmd, tb_process_attr_ref_t
                 tb_kernel32()->SetHandleInformation(process->si.hStdError, HANDLE_FLAG_INHERIT, TRUE);
                 bInheritHandle = TRUE;
             }
+        }
+
+        // init default std handles
+        if (process->si.dwFlags & STARTF_USESTDHANDLES)
+        {
+            if (!process->si.hStdInput) process->si.hStdInput   = GetStdHandle(STD_INPUT_HANDLE);
+            if (!process->si.hStdOutput) process->si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+            if (!process->si.hStdError) process->si.hStdError   = GetStdHandle(STD_ERROR_HANDLE);
         }
 
         // init process security attributes

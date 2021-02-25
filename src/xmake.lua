@@ -132,9 +132,7 @@ local groups = {nil, nil, nil, "ssl", "ssl", "ssl", "pcre", "pcre"}
 for idx, require_name in ipairs({"zlib", "sqlite3", "mysql", "mbedtls 2.13.*", "openssl 1.1.*", "polarssl", "pcre2", "pcre"}) do
     local name = require_name:split('%s')[1]
     if has_config(name) then
-        add_requires(require_name, {optional = true, group = groups[idx], on_load = function (package)
-            package:set("configvar", {["TB_CONFIG_PACKAGE_HAVE_" .. name:upper()] = 1})
-        end})
+        add_requires(require_name, {optional = true, group = groups[idx]})
     end
 end
 
@@ -162,7 +160,12 @@ end
 function check_module_cfuncs(module, includes, ...)
     for _, func in ipairs({...}) do
         local funcname = get_function_name(func)
-        configvar_check_cfuncs(("TB_CONFIG_%s_HAVE_%s"):format(module:upper(), funcname:upper()), func, {name = module .. "_" .. funcname, includes = includes, defines = "_GNU_SOURCE=1", languages = stdc})
+        configvar_check_cfuncs(("TB_CONFIG_%s_HAVE_%s"):format(module:upper(), funcname:upper()), func,
+            {name = module .. "_" .. funcname,
+             includes = includes,
+             defines = "_GNU_SOURCE=1",
+             warnings = "error",
+             languages = stdc})
     end
 end
 

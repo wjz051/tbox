@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Copyright (C) 2009-2020, TBOOX Open Source Group.
+ * Copyright (C) 2009-present, TBOOX Open Source Group.
  *
  * @author      ruki
  * @file        file.c
@@ -139,6 +139,11 @@ tb_bool_t tb_file_rename(tb_char_t const* path, tb_char_t const* dest)
     return tb_false;
 }
 tb_bool_t tb_file_link(tb_char_t const* path, tb_char_t const* dest)
+{
+    tb_trace_noimpl();
+    return tb_false;
+}
+tb_bool_t tb_file_access(tb_char_t const* path, tb_size_t mode)
 {
     tb_trace_noimpl();
     return tb_false;

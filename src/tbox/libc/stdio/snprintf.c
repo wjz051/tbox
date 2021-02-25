@@ -1,4 +1,4 @@
-/*!The Treasure Arch Library
+/*!The Treasure Box Library
  *
  * TArch is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
  * along with TArch;
  * If not, see <a href="http://www.gnu.org/licenses/"> http://www.gnu.org/licenses/</a>
  *
- * Copyright (C) 2009-2020, ruki All rights reserved.
+ * Copyright (C) 2009-present, ruki All rights reserved.
  *
  * @author      ruki
  * @file        snprintf.c
